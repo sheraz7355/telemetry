@@ -10,14 +10,14 @@ export default function Safety() {
   // Fetch real-time data from backend
   useEffect(() => {
     // 1. Get the profile (to know who to call)
-    fetch('http://localhost:5005/api/profile/latest')
+    fetch('http://127.0.0.1:8080/api/profile/latest')
       .then(res => res.json())
       .then(data => setProfile(data))
       .catch(err => console.error("Profile fetch error", err));
 
     // 2. Poll telemetry every 1 second
     const interval = setInterval(() => {
-      fetch(`http://localhost:5005/api/telemetry/latest/${deviceId}`)
+      fetch(`http://127.0.0.1:8080/api/telemetry/latest/${deviceId}`)
         .then(res => res.json())
         .then(data => setTelemetry(data))
         .catch(err => console.error("Telemetry fetch error", err));

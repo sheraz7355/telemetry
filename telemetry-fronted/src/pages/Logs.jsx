@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react';
 
 export default function Logs() {
-  const[logs, setLogs] = useState([]);
+  // FIXED: Changed variable names to match what the JSX table expects
+  const [logs, setLogs] = useState([]); 
   const [selectedLog, setSelectedLog] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const deviceId = "VX-9902";
+  
+  // Using the hardcoded device ID as you requested
+  const deviceId = "VX-9902"; 
 
   useEffect(() => {
     const fetchLogs = async () => {
       try {
-        const response = await fetch(`http://localhost:5005/api/telemetry/history/${deviceId}`);
+        // Fetching from the 'incidents' endpoint (which filters out boring data)
+        const response = await fetch(`http://127.0.0.1:8080/api/telemetry/incidents/${deviceId}`);
         if (response.ok) {
           const data = await response.json();
           setLogs(data);
@@ -24,7 +28,7 @@ export default function Logs() {
       }
     };
     fetchLogs();
-  }, []);
+  },[deviceId]);
 
   // Helper function to get incident type text
   const getIncidentType = (gForce) => {
@@ -35,7 +39,7 @@ export default function Logs() {
   };
 
   if (isLoading) {
-    return <div className="p-8 text-center text-primary animate-pulse">LOADING INCIDENT ARCHIVE...</div>;
+    return <div className="p-8 text-center text-primary animate-pulse tracking-widest font-bold">LOADING INCIDENT ARCHIVE...</div>;
   }
 
   return (
@@ -43,7 +47,7 @@ export default function Logs() {
       <div className="p-8 pb-4 shrink-0">
         <h1 className="font-headline text-3xl font-black tracking-tighter uppercase">Incident Archive</h1>
         <p className="text-xs text-outline font-medium tracking-wide mt-1">
-          Review of all historical telemetry data points from hardware
+          Review of recent high-impact telemetry data points
         </p>
       </div>
 

@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const twilio = require('twilio');
+const { en } = require('@faker-js/faker');
 
 const app = express();
 app.use(cors()); // Allows React to talk to this server
@@ -20,14 +21,15 @@ mongoose.connect(process.env.MONGODB_URI)
 // DATABASE SCHEMAS
 // ==========================================
 
-// 1. Profile Schema (Saves the Driver info and Emergency Contact)
+// 1. Profile Schema
 const profileSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true }, 
     driverName: String,
     email: String,
     emergencyNumber: String,
     hasCrashed: { type: Boolean, default: false } 
-});
+}, { timestamps: true }); // <--- ADD THIS COMMA AND OBJECT
+
 const Profile = mongoose.model('Profile', profileSchema);
 
 // 2. Telemetry Schema (Saves the Live Hardware Data from C++)
@@ -53,6 +55,25 @@ const Telemetry = mongoose.model('Telemetry', telemetrySchema);
 
 
 // ==========================================
+// API: GET RECENT HIGH-G INCIDENTS (For Logs page)
+// ==========================================
+app.get('/api/telemetry/incidents/:deviceId', async (req, res) => {
+    try {
+        // Find all events with a G-force > 1.2, sort by newest, limit to 50
+        const incidents = await Telemetry.find({ 
+            deviceId: req.params.deviceId,
+            "imu.peak_g": { $gt: 1.2 } 
+        })
+        .sort({ timestamp: -1 })
+        .limit(50);
+            
+        res.status(200).json(incidents);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch incidents" });
+    }
+});
+
+// ==========================================
 // API 1: REACT FRONTEND -> GET LATEST PROFILE
 // ==========================================
 app.get('/api/profile/latest', async (req, res) => {
@@ -66,6 +87,19 @@ app.get('/api/profile/latest', async (req, res) => {
     } catch (error) {
         console.error("❌ Error fetching profile:", error);
         res.status(500).json({ error: "Failed to fetch profile" });
+    }
+});
+
+// This is for your History page (Recent 50 logs total)
+app.get('/api/telemetry/history/:deviceId', async (req, res) => {
+    try {
+        const historyData = await Telemetry.find({ deviceId: req.params.deviceId })
+            .sort({ timestamp: -1 }) // Sort newest first
+            .limit(50);              // <--- ONLY GRAB THE LAST 50!
+            
+        res.status(200).json(historyData);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch history" });
     }
 });
 
@@ -163,8 +197,49 @@ app.post('/api/telemetry', async (req, res) => {
     }
 });
 
+
+// ==========================================
+// API 5: ADMIN DASHBOARD DATA
+// ==========================================
+
+// Get global stats
+app.get('/api/admin/stats', async (req, res) => {
+    try {
+        const totalVehicles = await Profile.countDocuments();
+        const totalIncidents = await Telemetry.countDocuments({ "imu.peak_g": { $gt: 1.8 } });
+        const criticalAlerts = await Telemetry.countDocuments({ "imu.peak_g": { $gt: 3.4 } });
+        
+        res.status(200).json({ totalVehicles, totalIncidents, criticalAlerts });
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch admin stats" });
+    }
+});
+
+// Get all registered vehicles
+app.get('/api/admin/vehicles', async (req, res) => {
+    try {
+        const vehicles = await Profile.find().sort({ updatedAt: -1 });
+        res.status(200).json(vehicles);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch vehicles" });
+    }
+});
+
+// Get all fleet incidents > 1.8G
+app.get('/api/admin/incidents', async (req, res) => {
+    try {
+        const incidents = await Telemetry.find({ "imu.peak_g": { $gt: 1.8 } })
+            .sort({ timestamp: -1 })
+            .limit(50);
+        res.status(200).json(incidents);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch fleet incidents" });
+    }
+});
+
 // --- START SERVER ---
-const PORT = process.env.PORT || 5005;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+const PORT = env.PORT ;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://127.0.0.1:${PORT}`);
+    console.log(`🚀 Also available on http://localhost:${PORT}`);
 });

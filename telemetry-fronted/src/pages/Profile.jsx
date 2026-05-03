@@ -15,7 +15,7 @@ export default function Profile() {
     const fetchLatestProfile = async () => {
       try {
         // Calling our new "latest" endpoint
-        const response = await fetch(`http://localhost:5005/api/profile/latest`);
+        const response = await fetch(`http://127.0.0.1:8080/api/profile/latest`);
         if (response.ok) {
           const data = await response.json();
           // Update all input boxes with the saved data from MongoDB!
@@ -38,7 +38,7 @@ export default function Profile() {
   const handleSaveProfile = async () => {
     setIsSaving(true);
     try {
-      const response = await fetch('http://localhost:5005/api/profile', {
+      const response = await fetch('http://127.0.0.1:5005/api/profile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

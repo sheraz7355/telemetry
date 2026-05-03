@@ -11,9 +11,9 @@ export default function Admin() {
             try {
                 // Fetch all data concurrently for speed
                 const [statsRes, incidentsRes, vehiclesRes] = await Promise.all([
-                    fetch('http://localhost:5005/api/admin/stats'),
-                    fetch('http://localhost:5005/api/admin/incidents'),
-                    fetch('http://localhost:5005/api/admin/vehicles')
+                    fetch('http://127.0.0.1:8080/api/admin/stats'),
+                    fetch('http://127.0.0.1:8080/api/admin/incidents'),
+                    fetch('http://127.0.0.1:8080/api/admin/vehicles')
                 ]);
 
                 if (!statsRes.ok || !incidentsRes.ok || !vehiclesRes.ok) {
