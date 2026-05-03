@@ -16,27 +16,48 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("✅ Connected to MongoDB"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// --- DATABASE SCHEMA ---
-// This tells the database what a "Profile" looks like
-// --- DATABASE SCHEMA ---
+// ==========================================
+// DATABASE SCHEMAS
+// ==========================================
+
+// 1. Profile Schema (Saves the Driver info and Emergency Contact)
 const profileSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true }, 
     driverName: String,
-    email: String, // <-- ADDED THIS
+    email: String,
     emergencyNumber: String,
     hasCrashed: { type: Boolean, default: false } 
 });
 const Profile = mongoose.model('Profile', profileSchema);
 
+// 2. Telemetry Schema (Saves the Live Hardware Data from C++)
+const telemetrySchema = new mongoose.Schema({
+    deviceId: { type: String, required: true },
+    imu: {
+        peak_g: Number,
+        accel_x: Number,
+        accel_y: Number,
+        accel_z: Number
+    },
+    gps: {
+        velocity_kmh: Number,
+        latitude: Number,
+        longitude: Number,
+        altitude_m: Number,
+        satellites: Number,
+        fixed: Boolean
+    },
+    timestamp: { type: Date, default: Date.now } // Used to calculate latency in React
+});
+const Telemetry = mongoose.model('Telemetry', telemetrySchema);
+
 
 // ==========================================
-// API: GET LATEST PROFILE (React calls this on load)
+// API 1: REACT FRONTEND -> GET LATEST PROFILE
 // ==========================================
 app.get('/api/profile/latest', async (req, res) => {
     try {
-        // Find the absolute most recently saved profile in the database
         const profile = await Profile.findOne().sort({ _id: -1 });
-        
         if (profile) {
             res.status(200).json(profile);
         } else {
@@ -48,21 +69,17 @@ app.get('/api/profile/latest', async (req, res) => {
     }
 });
 
-
 // ==========================================
-// API 1: REACT FRONTEND -> SAVE PROFILE
+// API 2: REACT FRONTEND -> SAVE PROFILE
 // ==========================================
 app.post('/api/profile', async (req, res) => {
-    // Added email to the request body
     const { deviceId, driverName, email, emergencyNumber } = req.body;
-    
-    // This will print exactly what the React app sent to the backend terminal
     console.log("📥 Received Profile Data:", req.body); 
 
     try {
         let profile = await Profile.findOneAndUpdate(
             { deviceId: deviceId },
-            { driverName, email, emergencyNumber }, // <-- Added email here
+            { driverName, email, emergencyNumber }, 
             { new: true, upsert: true } 
         );
         console.log("✅ Profile saved to MongoDB!");
@@ -73,43 +90,71 @@ app.post('/api/profile', async (req, res) => {
     }
 });
 
+// ==========================================
+// API 3: REACT FRONTEND -> GET LATEST TELEMETRY DATA (For Dashboard)
+// ==========================================
+app.get('/api/telemetry/latest/:deviceId', async (req, res) => {
+    try {
+        // Find the absolute newest hardware data for this specific car
+        const latestData = await Telemetry.findOne({ deviceId: req.params.deviceId }).sort({ timestamp: -1 });
+        if (latestData) {
+            res.status(200).json(latestData);
+        } else {
+            res.status(404).json({ message: "No hardware data found yet" });
+        }
+    } catch (error) {
+        console.error("❌ Error fetching telemetry:", error);
+        res.status(500).json({ error: "Failed to fetch telemetry" });
+    }
+});
 
 // ==========================================
-// API 2: HARDWARE -> TELEMETRY & CRASH LOGIC
+// API 4: HARDWARE (C++) -> RECEIVE TELEMETRY & CRASH LOGIC
 // ==========================================
 app.post('/api/telemetry', async (req, res) => {
     const data = req.body;
-    console.log(`📡 [TELEMETRY] Device ${data.device_id} | Peak G: ${data.imu.peak_g} | Satellites: ${data.gps.satellites}`);
+    console.log(`📡 [TELEMETRY] Device ${data.device_id} | Peak G: ${data.imu?.peak_g} | Satellites: ${data.gps?.satellites}`);
 
     try {
-        // 1. Check if the G-force is a crash (> 3.4g)
-        if (data.imu.peak_g > 3.4) {
+        // 1. SAVE THE HARDWARE DATA TO MONGODB FIRST
+        const newLog = new Telemetry({
+            deviceId: data.device_id,
+            imu: data.imu,
+            gps: data.gps
+        });
+        await newLog.save();
+
+        // 2. CHECK FOR CRASH (> 3.4g)
+        if (data.imu && data.imu.peak_g > 3.4) {
             
-            // 2. Look up the driver's profile in the database
+            // Look up the driver's profile
             const profile = await Profile.findOne({ deviceId: data.device_id });
 
             if (profile && !profile.hasCrashed) {
                 console.log(`🚨 [CRASH DETECTED] Calling ${profile.emergencyNumber}...`);
                 
-                // 3. Mark as crashed so we don't spam call them every millisecond
+                // Mark as crashed so we don't spam call
                 profile.hasCrashed = true;
                 await profile.save();
 
-                // 4. Make the Twilio Phone Call
-                await twilioClient.calls.create({
-                    twiml: `<Response>
-                              <Say voice="alice">Emergency Alert. Vehicle ${data.device_id} driven by ${profile.driverName} has experienced a severe impact of ${data.imu.peak_g} Gs.</Say>
-                              <Say voice="alice">Last known GPS coordinates are Latitude ${data.gps.latitude}, Longitude ${data.gps.longitude}. Please dispatch help immediately.</Say>
-                            </Response>`,
-                    to: profile.emergencyNumber,
-                    from: process.env.TWILIO_PHONE_NUMBER
-                });
-                
-                console.log(`📞 [CALL SUCCESS] Emergency services notified.`);
+                // Make the Twilio Phone Call
+                if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+                    await twilioClient.calls.create({
+                        twiml: `<Response>
+                                  <Say voice="alice">Emergency Alert. Vehicle ${data.device_id} driven by ${profile.driverName} has experienced a severe impact of ${data.imu.peak_g} Gs.</Say>
+                                  <Say voice="alice">Last known GPS coordinates are Latitude ${data.gps.latitude}, Longitude ${data.gps.longitude}. Please dispatch help immediately.</Say>
+                                </Response>`,
+                        to: profile.emergencyNumber,
+                        from: process.env.TWILIO_PHONE_NUMBER
+                    });
+                    console.log(`📞[CALL SUCCESS] Emergency services notified.`);
+                } else {
+                    console.log(`⚠️ [CALL SKIPPED] Twilio credentials not set in .env file yet.`);
+                }
             }
         }
 
-        // Return success to the ESP32/Hardware
+        // Return success to the ESP32/Hardware so it knows the server got it
         res.status(200).json({ status: "success" });
 
     } catch (error) {
